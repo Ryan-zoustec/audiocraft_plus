@@ -27,6 +27,10 @@ from .streaming import StreamingModule
 
 _efficient_attention_backend: str = 'torch'
 
+import os
+# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = '0'
+# 設置max_split_size_mb為256 MB
+# torch.cuda.set_max_workspace_size(256 * 1024 * 1024)
 
 def set_efficient_attention_backend(backend: str = 'torch'):
     # Using torch by default, it seems a bit faster on older P100 GPUs (~20% faster).
@@ -399,12 +403,32 @@ class StreamingMultiheadAttention(StreamingModule):
             if self.attention_as_float32:
                 q, k, v = [x.float() for x in [q, k, v]]
             if self.memory_efficient:
-                p = self.dropout if self.training else 0
-                if _efficient_attention_backend == 'torch':
-                    x = torch.nn.functional.scaled_dot_product_attention(
-                        q, k, v, is_causal=attn_mask is not None, dropout_p=p)
-                else:
-                    x = ops.memory_efficient_attention(q, k, v, attn_mask, p=p)
+                try:
+                    # 您的 GPU 代碼
+                    p = self.dropout if self.training else 0
+                    if _efficient_attention_backend == 'torch':
+                        x = torch.nn.functional.scaled_dot_product_attention(
+                            q, k, v, is_causal=attn_mask is not None, dropout_p=p)
+                    else:
+                        x = ops.memory_efficient_attention(q, k, v, attn_mask, p=p)
+                except RuntimeError as e:
+                    # 如果遇到 CUDA 記憶體不足的錯誤，切換到 CPU
+                    if "CUDA out of memory" in str(e):
+                        print("CUDA out of memory. Switching to CPU.")
+                        device = torch.device("cpu")
+                        torch.cuda.empty_cache()
+                        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = '0'
+                        
+                        p = self.dropout if self.training else 0
+                        if _efficient_attention_backend == 'torch':
+                            x = torch.nn.functional.scaled_dot_product_attention(
+                                q, k, v, is_causal=attn_mask is not None, dropout_p=p)
+                        else:
+                            x = ops.memory_efficient_attention(q, k, v, attn_mask, p=p)
+                    else:
+                        # 如果是其他 RuntimeError，可能需要進一步處理
+                        raise
+                
             else:
                 # We include the dot product as float32, for consistency
                 # with the other implementations that include that step

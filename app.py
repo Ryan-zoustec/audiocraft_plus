@@ -6,6 +6,8 @@
 
 # Updated to account for UI changes from https://github.com/rkfg/audiocraft/blob/long/app.py
 # also released under the MIT license.
+import sys
+print(sys.executable)
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor
@@ -62,6 +64,8 @@ MBD = None
 # We have to wrap subprocess call to clean a bit the log when using gr.make_waveform
 _old_call = sp.call
 
+torch.cuda.set_per_process_memory_fraction(0.99)
+device = torch.device("cpu")
 
 def generate_random_string(length):
     characters = string.ascii_letters + string.digits
